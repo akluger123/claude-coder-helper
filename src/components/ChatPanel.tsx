@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Send, Bot, User, Loader2, Sparkles } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { supabase } from "@/integrations/supabase/client";
@@ -16,10 +17,18 @@ interface ChatPanelProps {
   onApplyEdit: (newContent: string) => void;
 }
 
+const AI_MODELS = [
+  { value: "google/gemini-3-flash-preview", label: "Gemini Flash" },
+  { value: "google/gemini-2.5-pro", label: "Gemini Pro" },
+  { value: "openai/gpt-5", label: "GPT-5" },
+  { value: "openai/gpt-5-mini", label: "GPT-5 Mini" },
+];
+
 export function ChatPanel({ filename, fileContent, onApplyEdit }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [model, setModel] = useState("google/gemini-3-flash-preview");
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -29,7 +38,6 @@ export function ChatPanel({ filename, fileContent, onApplyEdit }: ChatPanelProps
     }
   }, [messages]);
 
-  // Auto-resize textarea
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
@@ -51,15 +59,19 @@ export function ChatPanel({ filename, fileContent, onApplyEdit }: ChatPanelProps
           messages: newMessages,
           filename,
           fileContent,
+          model,
         },
       });
 
       if (error) throw error;
 
+      if (data?.error) {
+        throw new Error(data.error);
+      }
+
       const assistantMsg: Message = { role: "assistant", content: data.reply };
       setMessages([...newMessages, assistantMsg]);
 
-      // Check if the response contains a code block to apply
       if (data.codeBlock) {
         onApplyEdit(data.codeBlock);
       }
@@ -76,9 +88,23 @@ export function ChatPanel({ filename, fileContent, onApplyEdit }: ChatPanelProps
 
   return (
     <div className="flex h-full flex-col bg-card">
-      <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
+      <div className="flex items-center gap-2 border-b border-border px-4 py-2">
         <Sparkles className="h-4 w-4 text-primary" />
         <span className="text-sm font-medium text-foreground">AI Assistant</span>
+        <div className="ml-auto">
+          <Select value={model} onValueChange={setModel}>
+            <SelectTrigger className="h-7 w-[140px] text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {AI_MODELS.map((m) => (
+                <SelectItem key={m.value} value={m.value} className="text-xs">
+                  {m.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <ScrollArea className="flex-1 p-4" ref={scrollRef as any}>
@@ -94,7 +120,7 @@ export function ChatPanel({ filename, fileContent, onApplyEdit }: ChatPanelProps
             </div>
           )}
           {messages.map((msg, i) => (
-            <div key={i} className={`flex gap-3 ${msg.role === "user" ? "" : ""}`}>
+            <div key={i} className="flex gap-3">
               <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
                 msg.role === "user" ? "bg-secondary" : "bg-primary/10"
               }`}>
