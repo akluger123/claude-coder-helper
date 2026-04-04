@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Send, Bot, User, Loader2, Sparkles } from "lucide-react";
+import { Send, Bot, User, Loader2, Sparkles, Files } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -11,10 +11,14 @@ interface Message {
   content: string;
 }
 
+interface FileInfo {
+  path: string;
+  content: string;
+}
+
 interface ChatPanelProps {
-  filename: string | null;
-  fileContent: string;
-  onApplyEdit: (newContent: string) => void;
+  files: FileInfo[];
+  onApplyEdits: (edits: Record<string, string>) => void;
 }
 
 const AI_MODELS = [
@@ -24,7 +28,7 @@ const AI_MODELS = [
   { value: "openai/gpt-5-mini", label: "GPT-5 Mini" },
 ];
 
-export function ChatPanel({ filename, fileContent, onApplyEdit }: ChatPanelProps) {
+export function ChatPanel({ files, onApplyEdits }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -45,8 +49,44 @@ export function ChatPanel({ filename, fileContent, onApplyEdit }: ChatPanelProps
     }
   }, [input]);
 
+  function parseMultiFileResponse(reply: string): Record<string, string> | null {
+    // Match patterns like: ```language:path/to/file\n...code...\n```
+    // or FILE: path/to/file followed by ```
+    const edits: Record<string, string> = {};
+
+    // Pattern 1: ```lang:filepath
+    const taggedBlocks = [...reply.matchAll(/```[\w]*:([^\n]+)\n([\s\S]*?)```/g)];
+    if (taggedBlocks.length > 0) {
+      for (const match of taggedBlocks) {
+        edits[match[1].trim()] = match[2].trim();
+      }
+      return Object.keys(edits).length > 0 ? edits : null;
+    }
+
+    // Pattern 2: **`filepath`** or ### filepath followed by code block
+    const headerBlocks = [...reply.matchAll(/(?:\*\*`([^`]+)`\*\*|###?\s+`?([^\n`]+)`?)\s*\n```[\w]*\n([\s\S]*?)```/g)];
+    if (headerBlocks.length > 0) {
+      for (const match of headerBlocks) {
+        const path = (match[1] || match[2]).trim();
+        edits[path] = match[3].trim();
+      }
+      return Object.keys(edits).length > 0 ? edits : null;
+    }
+
+    // Fallback: single code block → apply to first file
+    if (files.length === 1) {
+      const singleBlock = reply.match(/```[\w]*\n([\s\S]*?)```/);
+      if (singleBlock) {
+        edits[files[0].path] = singleBlock[1].trim();
+        return edits;
+      }
+    }
+
+    return null;
+  }
+
   async function sendMessage() {
-    if (!input.trim() || loading) return;
+    if (!input.trim() || loading || files.length === 0) return;
     const userMsg: Message = { role: "user", content: input.trim() };
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);
@@ -57,23 +97,21 @@ export function ChatPanel({ filename, fileContent, onApplyEdit }: ChatPanelProps
       const { data, error } = await supabase.functions.invoke("ai-chat", {
         body: {
           messages: newMessages,
-          filename,
-          fileContent,
+          files,
           model,
         },
       });
 
       if (error) throw error;
-
-      if (data?.error) {
-        throw new Error(data.error);
-      }
+      if (data?.error) throw new Error(data.error);
 
       const assistantMsg: Message = { role: "assistant", content: data.reply };
       setMessages([...newMessages, assistantMsg]);
 
-      if (data.codeBlock) {
-        onApplyEdit(data.codeBlock);
+      // Try to extract and apply edits
+      const edits = parseMultiFileResponse(data.reply);
+      if (edits) {
+        onApplyEdits(edits);
       }
     } catch (err: any) {
       const errorMsg: Message = {
@@ -85,6 +123,8 @@ export function ChatPanel({ filename, fileContent, onApplyEdit }: ChatPanelProps
       setLoading(false);
     }
   }
+
+  const fileNames = files.map((f) => f.path.split("/").pop()).join(", ");
 
   return (
     <div className="flex h-full flex-col bg-card">
@@ -107,14 +147,26 @@ export function ChatPanel({ filename, fileContent, onApplyEdit }: ChatPanelProps
         </div>
       </div>
 
+      {/* Show selected files */}
+      {files.length > 0 && (
+        <div className="flex items-center gap-1.5 border-b border-border px-4 py-1.5 text-[10px] text-muted-foreground">
+          <Files className="h-3 w-3" />
+          <span className="truncate">
+            {files.length === 1 ? files[0].path : `${files.length} files: ${fileNames}`}
+          </span>
+        </div>
+      )}
+
       <ScrollArea className="flex-1 p-4" ref={scrollRef as any}>
         <div className="space-y-4">
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <Bot className="h-10 w-10 text-muted-foreground/40 mb-3" />
               <p className="text-sm text-muted-foreground">
-                {filename
-                  ? `Ask me to edit ${filename}`
+                {files.length > 1
+                  ? `${files.length} files selected — ask me to edit them`
+                  : files.length === 1
+                  ? `Ask me to edit ${files[0].path}`
                   : "Select a file to start editing with AI"}
               </p>
             </div>
@@ -179,15 +231,15 @@ export function ChatPanel({ filename, fileContent, onApplyEdit }: ChatPanelProps
                 sendMessage();
               }
             }}
-            placeholder={filename ? `Ask about ${filename}...` : "Select a file first..."}
+            placeholder={files.length > 1 ? `Edit ${files.length} files...` : files.length === 1 ? `Ask about ${files[0].path}...` : "Select a file first..."}
             className="flex-1 resize-none rounded-md border border-border bg-secondary px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary font-sans"
             rows={1}
-            disabled={!filename}
+            disabled={files.length === 0}
           />
           <Button
             size="icon"
             onClick={sendMessage}
-            disabled={!input.trim() || loading || !filename}
+            disabled={!input.trim() || loading || files.length === 0}
             className="shrink-0 self-end"
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}

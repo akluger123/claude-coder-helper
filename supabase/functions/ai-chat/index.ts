@@ -12,7 +12,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { messages, filename, fileContent, model } = await req.json();
+    const { messages, files, model, filename, fileContent } = await req.json();
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
@@ -22,24 +22,46 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Build file context - support both new multi-file format and legacy single-file
+    let fileContext = "";
+    const fileList: { path: string; content: string }[] = files || [];
+
+    if (fileList.length === 0 && filename && fileContent) {
+      fileList.push({ path: filename, content: fileContent });
+    }
+
+    if (fileList.length === 1) {
+      fileContext = `Current file: ${fileList[0].path}\n\nCurrent file content:\n\`\`\`\n${fileList[0].content}\n\`\`\``;
+    } else if (fileList.length > 1) {
+      fileContext = `You are editing ${fileList.length} files simultaneously.\n\n` +
+        fileList.map((f) => `File: ${f.path}\n\`\`\`\n${f.content}\n\`\`\``).join("\n\n");
+    }
+
+    const multiFileInstructions = fileList.length > 1
+      ? `\n\nIMPORTANT: When providing code changes for multiple files, format each file's code block like this:
+**\`path/to/file\`**
+\`\`\`language
+...full file content...
+\`\`\`
+
+Always include the filename header before each code block so changes can be applied to the correct file.`
+      : "";
+
     const systemPrompt = `You are an expert AI code editor assistant. You help users modify code files.
 
 When the user asks you to edit code:
 1. Understand what they want to change
-2. Provide the COMPLETE updated file content in a single code block
+2. Provide the COMPLETE updated file content in a code block
 3. Explain what you changed
+${multiFileInstructions}
 
-When responding with code changes, wrap the FULL updated file in a code block with the appropriate language tag.
-
-${filename ? `Current file: ${filename}` : "No file selected"}
-${fileContent ? `\nCurrent file content:\n\`\`\`\n${fileContent}\n\`\`\`` : ""}`;
+${fileContext}`;
 
     const apiMessages = [
       { role: "system", content: systemPrompt },
       ...messages.map((m: any) => ({ role: m.role, content: m.content })),
     ];
 
-    // Default to gemini-3-flash-preview
     const selectedModel = model || "google/gemini-3-flash-preview";
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
@@ -78,11 +100,7 @@ ${fileContent ? `\nCurrent file content:\n\`\`\`\n${fileContent}\n\`\`\`` : ""}`
     const data = await response.json();
     const reply = data.choices?.[0]?.message?.content || "Sorry, I couldn't generate a response.";
 
-    // Extract code block if present
-    const codeBlockMatch = reply.match(/```[\w]*\n([\s\S]*?)```/);
-    const codeBlock = codeBlockMatch ? codeBlockMatch[1].trim() : null;
-
-    return new Response(JSON.stringify({ reply, codeBlock }), {
+    return new Response(JSON.stringify({ reply }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
