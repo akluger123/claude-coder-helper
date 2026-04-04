@@ -9,7 +9,7 @@ interface TokenInputProps {
   onSignOut?: () => void;
 }
 
-export function TokenInput({ onConnect, loading }: TokenInputProps) {
+export function TokenInput({ onConnect, loading, onSignOut }: TokenInputProps) {
   const [token, setToken] = useState("");
 
   return (
