@@ -1,46 +1,84 @@
 import { useState, useEffect } from "react";
+import { AuthPage } from "@/components/AuthPage";
 import { TokenInput } from "@/components/TokenInput";
 import { RepoSelector } from "@/components/RepoSelector";
 import { IDELayout } from "@/components/IDELayout";
 import { fetchUser, fetchRepos, fetchTree } from "@/lib/github";
 import type { Repo, TreeItem } from "@/lib/github";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 import { Loader2 } from "lucide-react";
+import type { User } from "@supabase/supabase-js";
 
-type View = "token" | "repos" | "editor";
+type View = "auth" | "token" | "repos" | "editor";
 
 export default function Index() {
-  const [view, setView] = useState<View>("token");
+  const [view, setView] = useState<View>("auth");
+  const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState("");
   const [repos, setRepos] = useState<Repo[]>([]);
   const [selectedRepo, setSelectedRepo] = useState<Repo | null>(null);
   const [tree, setTree] = useState<TreeItem[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [loadingMessage, setLoadingMessage] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [loadingMessage, setLoadingMessage] = useState("Checking session...");
   const { toast } = useToast();
 
-  // Check for saved token
+  // Listen for auth changes
   useEffect(() => {
-    const saved = localStorage.getItem("gh_token");
-    if (saved) {
-      connectWithToken(saved);
-    }
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        const currentUser = session?.user ?? null;
+        setUser(currentUser);
+
+        if (currentUser) {
+          // Try to load saved GitHub token from database
+          const { data } = await supabase
+            .from("user_tokens")
+            .select("github_token")
+            .eq("user_id", currentUser.id)
+            .maybeSingle();
+
+          if (data?.github_token) {
+            await connectWithToken(data.github_token, currentUser.id);
+          } else {
+            setView("token");
+            setLoading(false);
+          }
+        } else {
+          setView("auth");
+          setLoading(false);
+        }
+      }
+    );
+
+    supabase.auth.getSession();
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  async function connectWithToken(t: string) {
+  async function connectWithToken(t: string, userId?: string) {
     setLoading(true);
     setLoadingMessage("Verifying token...");
     try {
       await fetchUser(t);
       setToken(t);
-      localStorage.setItem("gh_token", t);
+
+      // Save token to database
+      const uid = userId || user?.id;
+      if (uid) {
+        await supabase.from("user_tokens").upsert(
+          { user_id: uid, github_token: t },
+          { onConflict: "user_id" }
+        );
+      }
+
       setLoadingMessage("Fetching repositories...");
       const r = await fetchRepos(t);
       setRepos(r);
       setView("repos");
     } catch (err: any) {
       toast({ title: "Connection failed", description: err.message, variant: "destructive" });
-      localStorage.removeItem("gh_token");
+      setView("token");
     } finally {
       setLoading(false);
       setLoadingMessage("");
@@ -64,13 +102,26 @@ export default function Index() {
     }
   }
 
-  function disconnect() {
+  async function disconnect() {
     setToken("");
     setRepos([]);
     setSelectedRepo(null);
     setTree([]);
+
+    if (user) {
+      await supabase.from("user_tokens").delete().eq("user_id", user.id);
+    }
+
     setView("token");
-    localStorage.removeItem("gh_token");
+  }
+
+  async function signOut() {
+    await supabase.auth.signOut();
+    setToken("");
+    setRepos([]);
+    setSelectedRepo(null);
+    setTree([]);
+    setView("auth");
   }
 
   if (loading && view !== "editor") {
@@ -83,13 +134,15 @@ export default function Index() {
   }
 
   switch (view) {
+    case "auth":
+      return <AuthPage />;
     case "token":
-      return <TokenInput onConnect={connectWithToken} loading={loading} />;
+      return <TokenInput onConnect={(t) => connectWithToken(t)} loading={loading} onSignOut={signOut} />;
     case "repos":
       return <RepoSelector repos={repos} onSelect={selectRepo} />;
     case "editor":
       return selectedRepo ? (
-        <IDELayout token={token} repo={selectedRepo} tree={tree} onDisconnect={disconnect} />
+        <IDELayout token={token} repo={selectedRepo} tree={tree} onDisconnect={disconnect} onSignOut={signOut} />
       ) : null;
   }
 }
