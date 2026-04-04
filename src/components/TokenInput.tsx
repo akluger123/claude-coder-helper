@@ -6,6 +6,7 @@ import { KeyRound, Github, ExternalLink } from "lucide-react";
 interface TokenInputProps {
   onConnect: (token: string) => void;
   loading: boolean;
+  onSignOut?: () => void;
 }
 
 export function TokenInput({ onConnect, loading }: TokenInputProps) {
