@@ -1,15 +1,18 @@
 import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Search, Lock, Globe, GitBranch } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Search, Lock, Globe, GitBranch, ArrowLeft, MessageSquare } from "lucide-react";
 import type { Repo } from "@/lib/github";
 
 interface RepoSelectorProps {
   repos: Repo[];
   onSelect: (repo: Repo) => void;
+  onBack?: () => void;
+  onSkipToChat?: () => void;
 }
 
-export function RepoSelector({ repos, onSelect }: RepoSelectorProps) {
+export function RepoSelector({ repos, onSelect, onBack, onSkipToChat }: RepoSelectorProps) {
   const [filter, setFilter] = useState("");
   const filtered = repos.filter((r) =>
     r.full_name.toLowerCase().includes(filter.toLowerCase())
@@ -18,9 +21,20 @@ export function RepoSelector({ repos, onSelect }: RepoSelectorProps) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <div className="w-full max-w-lg space-y-4">
-        <div className="text-center space-y-2">
+        <div className="text-center space-y-2 relative">
+          {onBack && (
+            <Button variant="ghost" size="sm" className="absolute left-0 top-0" onClick={onBack}>
+              <ArrowLeft className="h-4 w-4 mr-1" /> Back
+            </Button>
+          )}
           <h2 className="text-xl font-semibold text-foreground">Select a Repository</h2>
           <p className="text-sm text-muted-foreground">{repos.length} repositories found</p>
+          {onSkipToChat && (
+            <button onClick={onSkipToChat} className="text-xs text-primary hover:text-primary/80 transition-colors font-medium">
+              <MessageSquare className="h-3 w-3 inline mr-1" />
+              Skip — use AI without a repo
+            </button>
+          )}
         </div>
 
         <div className="relative">
