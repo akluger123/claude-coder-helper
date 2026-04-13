@@ -3,6 +3,7 @@ import { AuthPage } from "@/components/AuthPage";
 import { TokenInput } from "@/components/TokenInput";
 import { RepoSelector } from "@/components/RepoSelector";
 import { IDELayout } from "@/components/IDELayout";
+import { StandaloneChat } from "@/components/StandaloneChat";
 import { fetchUser, fetchRepos, fetchTree } from "@/lib/github";
 import type { Repo, TreeItem } from "@/lib/github";
 import { useToast } from "@/hooks/use-toast";
@@ -10,7 +11,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Loader2 } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
 
-type View = "auth" | "token" | "repos" | "editor";
+type View = "auth" | "token" | "repos" | "editor" | "chat";
 
 export default function Index() {
   const [view, setView] = useState<View>("auth");
@@ -23,7 +24,18 @@ export default function Index() {
   const [loadingMessage, setLoadingMessage] = useState("Checking session...");
   const { toast } = useToast();
 
-  // Listen for auth changes
+  // Safety timeout to prevent infinite loading
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      if (loading) {
+        setLoading(false);
+        if (!user) setView("auth");
+        else setView("token");
+      }
+    }, 10000);
+    return () => clearTimeout(timeout);
+  }, [loading, user]);
+
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
@@ -31,16 +43,20 @@ export default function Index() {
         setUser(currentUser);
 
         if (currentUser) {
-          // Try to load saved GitHub token from database
-          const { data } = await supabase
-            .from("user_tokens")
-            .select("github_token")
-            .eq("user_id", currentUser.id)
-            .maybeSingle();
+          try {
+            const { data } = await supabase
+              .from("user_tokens")
+              .select("github_token")
+              .eq("user_id", currentUser.id)
+              .maybeSingle();
 
-          if (data?.github_token) {
-            await connectWithToken(data.github_token, currentUser.id);
-          } else {
+            if (data?.github_token) {
+              await connectWithToken(data.github_token, currentUser.id);
+            } else {
+              setView("token");
+              setLoading(false);
+            }
+          } catch {
             setView("token");
             setLoading(false);
           }
@@ -55,6 +71,12 @@ export default function Index() {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  function goToMenu() {
+    setSelectedRepo(null);
+    setTree([]);
+    setView("token");
+  }
 
   async function connectWithToken(t: string, userId?: string) {
     setLoading(true);
@@ -121,6 +143,7 @@ export default function Index() {
     setRepos([]);
     setSelectedRepo(null);
     setTree([]);
+    setUser(null);
     setView("auth");
   }
 
@@ -137,12 +160,28 @@ export default function Index() {
     case "auth":
       return <AuthPage />;
     case "token":
-      return <TokenInput onConnect={(t) => connectWithToken(t)} loading={loading} onSignOut={signOut} />;
+      return (
+        <TokenInput
+          onConnect={(t) => connectWithToken(t)}
+          loading={loading}
+          onSignOut={signOut}
+          onSkipToChat={() => setView("chat")}
+        />
+      );
     case "repos":
-      return <RepoSelector repos={repos} onSelect={selectRepo} />;
+      return (
+        <RepoSelector
+          repos={repos}
+          onSelect={selectRepo}
+          onBack={goToMenu}
+          onSkipToChat={() => setView("chat")}
+        />
+      );
+    case "chat":
+      return <StandaloneChat onBack={goToMenu} onSignOut={signOut} />;
     case "editor":
       return selectedRepo ? (
-        <IDELayout token={token} repo={selectedRepo} tree={tree} onDisconnect={disconnect} onSignOut={signOut} />
+        <IDELayout token={token} repo={selectedRepo} tree={tree} onDisconnect={disconnect} onSignOut={signOut} onBack={goToMenu} />
       ) : null;
   }
 }
