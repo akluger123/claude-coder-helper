@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Send, Bot, User, Loader2, Sparkles, Files } from "lucide-react";
+import { Send, Bot, User, Loader2, Sparkles, Files, Square } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -26,6 +26,8 @@ const AI_MODELS = [
   { value: "google/gemini-2.5-pro", label: "Gemini Pro" },
   { value: "openai/gpt-5", label: "GPT-5" },
   { value: "openai/gpt-5-mini", label: "GPT-5 Mini" },
+  { value: "minimax", label: "Minimax" },
+  { value: "google-phi", label: "Google Phi" },
 ];
 
 export function ChatPanel({ files, onApplyEdits }: ChatPanelProps) {
@@ -35,6 +37,7 @@ export function ChatPanel({ files, onApplyEdits }: ChatPanelProps) {
   const [model, setModel] = useState("google/gemini-3-flash-preview");
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -85,13 +88,22 @@ export function ChatPanel({ files, onApplyEdits }: ChatPanelProps) {
     return null;
   }
 
+  function stopGeneration() {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setLoading(false);
+  }
+
   async function sendMessage() {
-    if (!input.trim() || loading || files.length === 0) return;
+    if (!input.trim() || loading) return;
     const userMsg: Message = { role: "user", content: input.trim() };
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);
     setInput("");
     setLoading(true);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     try {
       const { data, error } = await supabase.functions.invoke("ai-chat", {
@@ -102,6 +114,7 @@ export function ChatPanel({ files, onApplyEdits }: ChatPanelProps) {
         },
       });
 
+      if (controller.signal.aborted) return;
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
 
@@ -114,6 +127,7 @@ export function ChatPanel({ files, onApplyEdits }: ChatPanelProps) {
         onApplyEdits(edits);
       }
     } catch (err: any) {
+      if (err?.name === "AbortError") return;
       const errorMsg: Message = {
         role: "assistant",
         content: `Error: ${err.message || "Failed to get AI response"}`,
@@ -121,6 +135,7 @@ export function ChatPanel({ files, onApplyEdits }: ChatPanelProps) {
       setMessages([...newMessages, errorMsg]);
     } finally {
       setLoading(false);
+      abortRef.current = null;
     }
   }
 
@@ -234,15 +249,16 @@ export function ChatPanel({ files, onApplyEdits }: ChatPanelProps) {
             placeholder={files.length > 1 ? `Edit ${files.length} files...` : files.length === 1 ? `Ask about ${files[0].path}...` : "Select a file first..."}
             className="flex-1 resize-none rounded-md border border-border bg-secondary px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary font-sans"
             rows={1}
-            disabled={files.length === 0}
+            disabled={false}
           />
           <Button
             size="icon"
-            onClick={sendMessage}
-            disabled={!input.trim() || loading || files.length === 0}
+            onClick={loading ? stopGeneration : sendMessage}
+            disabled={!loading && !input.trim()}
             className="shrink-0 self-end"
+            variant={loading ? "destructive" : "default"}
           >
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            {loading ? <Square className="h-4 w-4" /> : <Send className="h-4 w-4" />}
           </Button>
         </div>
       </div>
