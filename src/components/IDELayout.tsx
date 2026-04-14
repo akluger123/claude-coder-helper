@@ -170,6 +170,9 @@ export function IDELayout({ token, repo, tree, onDisconnect, onSignOut, onBack }
               Commit
             </Button>
           )}
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setPreviewOpen(!previewOpen)} title="Toggle preview">
+            {previewOpen ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          </Button>
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setChatOpen(!chatOpen)}>
             {chatOpen ? <PanelRightClose className="h-4 w-4" /> : <MessageSquare className="h-4 w-4" />}
           </Button>
