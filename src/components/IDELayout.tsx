@@ -250,21 +250,27 @@ export function IDELayout({ token, repo, tree, onDisconnect, onSignOut, onBack }
             </div>
           )}
 
-          {/* Editor */}
-          <div className="flex-1 overflow-hidden">
-            {loadingFile ? (
-              <div className="flex h-full items-center justify-center">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-              </div>
-            ) : selectedPath ? (
-              <CodeEditor
-                filename={selectedPath}
-                content={fileContent}
-                onChange={(c) => setFileContent(selectedPath, c)}
-              />
-            ) : (
-              <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
-                <p className="text-sm">Select a file to start editing</p>
+          <div className={`flex-1 overflow-hidden ${previewOpen ? "flex" : ""}`}>
+            <div className={previewOpen ? "flex-1 overflow-hidden" : "h-full"}>
+              {loadingFile ? (
+                <div className="flex h-full items-center justify-center">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : selectedPath ? (
+                <CodeEditor
+                  filename={selectedPath}
+                  content={fileContent}
+                  onChange={(c) => setFileContent(selectedPath, c)}
+                />
+              ) : (
+                <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
+                  <p className="text-sm">Select a file to start editing</p>
+                </div>
+              )}
+            </div>
+            {previewOpen && selectedPath && (
+              <div className="w-1/2 border-l border-border overflow-hidden">
+                <PreviewPanel filename={selectedPath} content={fileContent} />
               </div>
             )}
           </div>
