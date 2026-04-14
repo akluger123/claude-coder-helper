@@ -22,12 +22,17 @@ interface ChatPanelProps {
 }
 
 const AI_MODELS = [
-  { value: "google/gemini-3-flash-preview", label: "Gemini Flash" },
-  { value: "google/gemini-2.5-pro", label: "Gemini Pro" },
-  { value: "openai/gpt-5", label: "GPT-5" },
-  { value: "openai/gpt-5-mini", label: "GPT-5 Mini" },
-  { value: "minimax", label: "MiniMax M2.5" },
-  { value: "google-phi", label: "Phi-4 Mini" },
+  { value: "google/gemini-3-flash-preview", label: "Gemini 3 Flash", badge: null },
+  { value: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro", badge: null },
+  { value: "google/gemini-3.1-pro-preview", label: "Gemini 3.1 Pro", badge: "new" },
+  { value: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash", badge: null },
+  { value: "google/gemini-2.5-flash-lite", label: "Gemini Flash Lite", badge: null },
+  { value: "openai/gpt-5", label: "GPT-5", badge: null },
+  { value: "openai/gpt-5-mini", label: "GPT-5 Mini", badge: null },
+  { value: "openai/gpt-5-nano", label: "GPT-5 Nano", badge: null },
+  { value: "openai/gpt-5.2", label: "GPT-5.2", badge: "new" },
+  { value: "minimax", label: "MiniMax M2.5", badge: "maintenance" },
+  { value: "google-phi", label: "Phi-4 Mini", badge: "maintenance" },
 ];
 
 export function ChatPanel({ files, onApplyEdits }: ChatPanelProps) {
