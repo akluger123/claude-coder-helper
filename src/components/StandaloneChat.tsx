@@ -16,8 +16,8 @@ const AI_MODELS = [
   { value: "google/gemini-2.5-pro", label: "Gemini Pro" },
   { value: "openai/gpt-5", label: "GPT-5" },
   { value: "openai/gpt-5-mini", label: "GPT-5 Mini" },
-  { value: "minimax", label: "Minimax" },
-  { value: "google-phi", label: "Google Phi" },
+  { value: "minimax", label: "MiniMax M2.5" },
+  { value: "google-phi", label: "Phi-4 Mini" },
 ];
 
 interface StandaloneChatProps {
