@@ -2,11 +2,12 @@ import { useState, useCallback } from "react";
 import { FileTree } from "@/components/FileTree";
 import { CodeEditor } from "@/components/CodeEditor";
 import { ChatPanel } from "@/components/ChatPanel";
+import { PreviewPanel } from "@/components/PreviewPanel";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   GitBranch, Save, LogOut, PanelLeftClose, PanelLeft,
-  MessageSquare, PanelRightClose, X, Loader2, CheckSquare
+  MessageSquare, PanelRightClose, X, Loader2, CheckSquare, Eye, EyeOff
 } from "lucide-react";
 import { ArrowLeft } from "lucide-react";
 import { fetchFileContent, updateFile } from "@/lib/github";
