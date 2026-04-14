@@ -158,8 +158,16 @@ export function ChatPanel({ files, onApplyEdits }: ChatPanelProps) {
             </SelectTrigger>
             <SelectContent>
               {AI_MODELS.map((m) => (
-                <SelectItem key={m.value} value={m.value} className="text-xs">
-                  {m.label}
+                <SelectItem key={m.value} value={m.value} className="text-xs" disabled={m.badge === "maintenance"}>
+                  <span className="flex items-center gap-1.5">
+                    {m.label}
+                    {m.badge === "maintenance" && (
+                      <span className="rounded bg-yellow-500/20 px-1 py-0.5 text-[9px] font-medium text-yellow-400">MAINTENANCE</span>
+                    )}
+                    {m.badge === "new" && (
+                      <span className="rounded bg-green-500/20 px-1 py-0.5 text-[9px] font-medium text-green-400">NEW</span>
+                    )}
+                  </span>
                 </SelectItem>
               ))}
             </SelectContent>
