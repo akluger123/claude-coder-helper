@@ -72,10 +72,40 @@ export default function Index() {
     return () => subscription.unsubscribe();
   }, []);
 
-  function goToMenu() {
+  function goToTokenPage() {
     setSelectedRepo(null);
     setTree([]);
     setView("token");
+  }
+
+  async function goToRepoMenu() {
+    setSelectedRepo(null);
+    setTree([]);
+
+    if (!token) {
+      setView("token");
+      return;
+    }
+
+    if (repos.length > 0) {
+      setView("repos");
+      return;
+    }
+
+    setLoading(true);
+    setLoadingMessage("Fetching repositories...");
+
+    try {
+      const nextRepos = await fetchRepos(token);
+      setRepos(nextRepos);
+      setView("repos");
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+      setView("token");
+    } finally {
+      setLoading(false);
+      setLoadingMessage("");
+    }
   }
 
   async function connectWithToken(t: string, userId?: string) {
@@ -173,15 +203,15 @@ export default function Index() {
         <RepoSelector
           repos={repos}
           onSelect={selectRepo}
-          onBack={goToMenu}
+          onBack={goToTokenPage}
           onSkipToChat={() => setView("chat")}
         />
       );
     case "chat":
-      return <StandaloneChat onBack={goToMenu} onSignOut={signOut} />;
+      return <StandaloneChat onBack={goToRepoMenu} onSignOut={signOut} />;
     case "editor":
       return selectedRepo ? (
-        <IDELayout token={token} repo={selectedRepo} tree={tree} onDisconnect={disconnect} onSignOut={signOut} onBack={goToMenu} />
+        <IDELayout token={token} repo={selectedRepo} tree={tree} onDisconnect={disconnect} onSignOut={signOut} onBack={goToRepoMenu} />
       ) : null;
   }
 }

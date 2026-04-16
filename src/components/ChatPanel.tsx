@@ -2,10 +2,12 @@ import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Send, Bot, User, Loader2, Sparkles, Files, Square } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Send, Bot, User, Sparkles, Files, Square, Users } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { supabase } from "@/integrations/supabase/client";
-import { AI_MODELS } from "@/lib/ai-models";
+import { AI_MODELS, DEFAULT_AI_MODEL, TEAM_AI_MODELS, isSelectableModel } from "@/lib/ai-models";
+import { useToast } from "@/hooks/use-toast";
 
 interface Message {
   role: "user" | "assistant";
@@ -20,22 +22,41 @@ interface FileInfo {
 interface ChatPanelProps {
   files: FileInfo[];
   onApplyEdits: (edits: Record<string, string>) => void;
+  prepareFiles?: () => Promise<FileInfo[]>;
+  repoName?: string;
+  repoTree?: string[];
+  selectedCount?: number;
 }
 
-export function ChatPanel({ files, onApplyEdits }: ChatPanelProps) {
+export function ChatPanel({ files, onApplyEdits, prepareFiles, repoName, repoTree, selectedCount }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [model, setModel] = useState("google/gemini-3-flash-preview");
+  const [model, setModel] = useState(DEFAULT_AI_MODEL);
+  const [teamMode, setTeamMode] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const latestFilesRef = useRef<FileInfo[]>(files);
+  const { toast } = useToast();
+
+  const selectedFileCount = selectedCount ?? files.length;
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages]);
+
+  useEffect(() => {
+    latestFilesRef.current = files;
+  }, [files]);
+
+  useEffect(() => {
+    if (!isSelectableModel(model)) {
+      setModel(DEFAULT_AI_MODEL);
+    }
+  }, [model]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -45,6 +66,8 @@ export function ChatPanel({ files, onApplyEdits }: ChatPanelProps) {
   }, [input]);
 
   function parseMultiFileResponse(reply: string): Record<string, string> | null {
+    const currentFiles = latestFilesRef.current;
+
     // Match patterns like: ```language:path/to/file\n...code...\n```
     // or FILE: path/to/file followed by ```
     const edits: Record<string, string> = {};
@@ -69,10 +92,10 @@ export function ChatPanel({ files, onApplyEdits }: ChatPanelProps) {
     }
 
     // Fallback: single code block → apply to first file
-    if (files.length === 1) {
+    if (currentFiles.length === 1) {
       const singleBlock = reply.match(/```[\w]*\n([\s\S]*?)```/);
       if (singleBlock) {
-        edits[files[0].path] = singleBlock[1].trim();
+        edits[currentFiles[0].path] = singleBlock[1].trim();
         return edits;
       }
     }
@@ -98,17 +121,28 @@ export function ChatPanel({ files, onApplyEdits }: ChatPanelProps) {
     abortRef.current = controller;
 
     try {
+      const preparedFiles = prepareFiles ? await prepareFiles() : files;
+      latestFilesRef.current = preparedFiles;
+
       const { data, error } = await supabase.functions.invoke("ai-chat", {
         body: {
           messages: newMessages,
-          files,
+          files: preparedFiles,
           model,
+          models: teamMode ? TEAM_AI_MODELS : undefined,
+          repoName,
+          repoTree,
         },
       });
 
       if (controller.signal.aborted) return;
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
+
+      const notices = [...new Set([data?.warning, ...(Array.isArray(data?.warnings) ? data.warnings : [])].filter(Boolean))];
+      if (notices.length > 0) {
+        toast({ title: "Model notice", description: notices[0] });
+      }
 
       const assistantMsg: Message = { role: "assistant", content: data.reply };
       setMessages([...newMessages, assistantMsg]);
@@ -120,6 +154,7 @@ export function ChatPanel({ files, onApplyEdits }: ChatPanelProps) {
       }
     } catch (err: any) {
       if (err?.name === "AbortError") return;
+      toast({ title: "AI request failed", description: err.message || "Failed to get AI response", variant: "destructive" });
       const errorMsg: Message = {
         role: "assistant",
         content: `Error: ${err.message || "Failed to get AI response"}`,
@@ -138,21 +173,30 @@ export function ChatPanel({ files, onApplyEdits }: ChatPanelProps) {
       <div className="flex items-center gap-2 border-b border-border px-4 py-2">
         <Sparkles className="h-4 w-4 text-primary" />
         <span className="text-sm font-medium text-foreground">AI Assistant</span>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          <Button
+            variant={teamMode ? "secondary" : "ghost"}
+            size="sm"
+            className="h-7 gap-1.5 px-2 text-xs"
+            onClick={() => setTeamMode((current) => !current)}
+            title="Use up to 5 models together"
+          >
+            <Users className="h-3.5 w-3.5" />
+            x5
+          </Button>
           <Select value={model} onValueChange={setModel}>
             <SelectTrigger className="h-7 w-[140px] text-xs">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {AI_MODELS.map((m) => (
-                <SelectItem key={m.value} value={m.value} className="text-xs" disabled={m.badge === "maintenance"}>
+                <SelectItem key={m.value} value={m.value} className="text-xs" disabled={!!m.disabled}>
                   <span className="flex items-center gap-1.5">
                     {m.label}
-                    {m.badge === "maintenance" && (
-                      <span className="rounded bg-yellow-500/20 px-1 py-0.5 text-[9px] font-medium text-yellow-400">MAINTENANCE</span>
-                    )}
-                    {m.badge === "new" && (
-                      <span className="rounded bg-green-500/20 px-1 py-0.5 text-[9px] font-medium text-green-400">NEW</span>
+                    {m.badge && (
+                      <Badge variant="secondary" className="px-1 py-0 text-[9px] uppercase tracking-wide">
+                        {m.badge}
+                      </Badge>
                     )}
                   </span>
                 </SelectItem>
@@ -163,11 +207,17 @@ export function ChatPanel({ files, onApplyEdits }: ChatPanelProps) {
       </div>
 
       {/* Show selected files */}
-      {files.length > 0 && (
+      {(selectedFileCount > 0 || repoName) && (
         <div className="flex items-center gap-1.5 border-b border-border px-4 py-1.5 text-[10px] text-muted-foreground">
           <Files className="h-3 w-3" />
           <span className="truncate">
-            {files.length === 1 ? files[0].path : `${files.length} files: ${fileNames}`}
+            {selectedFileCount === 1 && files.length === 1
+              ? files[0].path
+              : selectedFileCount > 1
+                ? `${selectedFileCount} files selected${fileNames ? `: ${fileNames}` : ""}`
+                : repoName
+                  ? `${repoName} repository context`
+                  : "No files selected"}
           </span>
         </div>
       )}
@@ -178,11 +228,13 @@ export function ChatPanel({ files, onApplyEdits }: ChatPanelProps) {
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <Bot className="h-10 w-10 text-muted-foreground/40 mb-3" />
               <p className="text-sm text-muted-foreground">
-                {files.length > 1
-                  ? `${files.length} files selected — ask me to edit them`
-                  : files.length === 1
-                  ? `Ask me to edit ${files[0].path}`
-                  : "Select a file to start editing with AI"}
+                {selectedFileCount > 1
+                  ? `${selectedFileCount} files selected — ask me to edit them`
+                  : selectedFileCount === 1 && files.length === 1
+                    ? `Ask me to edit ${files[0].path}`
+                    : repoName
+                      ? `Use All Files or ask me about ${repoName}`
+                      : "Select a file to start editing with AI"}
               </p>
             </div>
           )}
@@ -246,7 +298,7 @@ export function ChatPanel({ files, onApplyEdits }: ChatPanelProps) {
                 sendMessage();
               }
             }}
-            placeholder={files.length > 1 ? `Edit ${files.length} files...` : files.length === 1 ? `Ask about ${files[0].path}...` : "Select a file first..."}
+            placeholder={selectedFileCount > 1 ? `Edit ${selectedFileCount} files...` : selectedFileCount === 1 && files.length === 1 ? `Ask about ${files[0].path}...` : repoName ? `Ask about ${repoName}...` : "Select a file first..."}
             className="flex-1 resize-none rounded-md border border-border bg-secondary px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary font-sans"
             rows={1}
             disabled={false}

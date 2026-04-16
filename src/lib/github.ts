@@ -1,5 +1,11 @@
 const GITHUB_API = "https://api.github.com";
 
+const BINARY_EXTENSIONS = new Set([
+  "7z", "avif", "bmp", "class", "dll", "doc", "docx", "eot", "exe", "gif", "gz", "ico", "jar",
+  "jpeg", "jpg", "lockb", "mov", "mp3", "mp4", "otf", "pdf", "png", "pyc", "so", "tar", "ttf",
+  "wav", "webm", "webp", "woff", "woff2", "zip",
+]);
+
 function headers(token: string) {
   return {
     Authorization: `Bearer ${token}`,
@@ -87,6 +93,13 @@ export async function updateFile(
     const err = await res.json();
     throw new Error(err.message || "Failed to update file");
   }
+}
+
+export function isTextFilePath(path: string): boolean {
+  const filename = path.split("/").pop()?.toLowerCase() || "";
+  if (!filename.includes(".")) return true;
+  const ext = filename.split(".").pop() || "";
+  return !BINARY_EXTENSIONS.has(ext);
 }
 
 export function getLanguage(filename: string): string {

@@ -2,10 +2,12 @@ import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Send, Bot, User, Loader2, Sparkles, ArrowLeft, Square } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Send, Bot, User, Sparkles, ArrowLeft, Square, Users } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { supabase } from "@/integrations/supabase/client";
-import { AI_MODELS } from "@/lib/ai-models";
+import { AI_MODELS, DEFAULT_AI_MODEL, TEAM_AI_MODELS, isSelectableModel } from "@/lib/ai-models";
+import { useToast } from "@/hooks/use-toast";
 
 interface Message {
   role: "user" | "assistant";
@@ -21,10 +23,12 @@ export function StandaloneChat({ onBack, onSignOut }: StandaloneChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [model, setModel] = useState("google/gemini-3-flash-preview");
+  const [model, setModel] = useState(DEFAULT_AI_MODEL);
+  const [teamMode, setTeamMode] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const { toast } = useToast();
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -38,6 +42,12 @@ export function StandaloneChat({ onBack, onSignOut }: StandaloneChatProps) {
       textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 120) + "px";
     }
   }, [input]);
+
+  useEffect(() => {
+    if (!isSelectableModel(model)) {
+      setModel(DEFAULT_AI_MODEL);
+    }
+  }, [model]);
 
   function stopGeneration() {
     abortRef.current?.abort();
@@ -58,16 +68,22 @@ export function StandaloneChat({ onBack, onSignOut }: StandaloneChatProps) {
 
     try {
       const { data, error } = await supabase.functions.invoke("ai-chat", {
-        body: { messages: newMessages, files: [], model, webSearch: true },
+        body: { messages: newMessages, files: [], model, models: teamMode ? TEAM_AI_MODELS : undefined },
       });
 
       if (controller.signal.aborted) return;
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
 
+      const notices = [...new Set([data?.warning, ...(Array.isArray(data?.warnings) ? data.warnings : [])].filter(Boolean))];
+      if (notices.length > 0) {
+        toast({ title: "Model notice", description: notices[0] });
+      }
+
       setMessages([...newMessages, { role: "assistant", content: data.reply }]);
     } catch (err: any) {
       if (err?.name === "AbortError") return;
+      toast({ title: "AI request failed", description: err.message || "Failed to get AI response", variant: "destructive" });
       setMessages([...newMessages, { role: "assistant", content: `Error: ${err.message || "Failed to get AI response"}` }]);
     } finally {
       setLoading(false);
@@ -80,26 +96,35 @@ export function StandaloneChat({ onBack, onSignOut }: StandaloneChatProps) {
       <div className="flex h-12 items-center justify-between border-b border-border bg-card px-4">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="sm" onClick={onBack}>
-            <ArrowLeft className="h-4 w-4 mr-1" /> Back
+            <ArrowLeft className="h-4 w-4 mr-1" /> Repos
           </Button>
           <Sparkles className="h-4 w-4 text-primary" />
           <span className="text-sm font-medium text-foreground">AI Assistant</span>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant={teamMode ? "secondary" : "ghost"}
+            size="sm"
+            className="h-8 gap-1.5 px-2 text-xs"
+            onClick={() => setTeamMode((current) => !current)}
+            title="Use up to 5 models together"
+          >
+            <Users className="h-3.5 w-3.5" />
+            x5
+          </Button>
           <Select value={model} onValueChange={setModel}>
             <SelectTrigger className="h-8 w-[160px] text-xs">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {AI_MODELS.map((m) => (
-                <SelectItem key={m.value} value={m.value} className="text-xs" disabled={m.badge === "maintenance"}>
+                <SelectItem key={m.value} value={m.value} className="text-xs" disabled={!!m.disabled}>
                   <span className="flex items-center gap-1.5">
                     {m.label}
-                    {m.badge === "maintenance" && (
-                      <span className="rounded bg-yellow-500/20 px-1 py-0.5 text-[9px] font-medium text-yellow-400">MAINTENANCE</span>
-                    )}
-                    {m.badge === "new" && (
-                      <span className="rounded bg-green-500/20 px-1 py-0.5 text-[9px] font-medium text-green-400">NEW</span>
+                    {m.badge && (
+                      <Badge variant="secondary" className="px-1 py-0 text-[9px] uppercase tracking-wide">
+                        {m.badge}
+                      </Badge>
                     )}
                   </span>
                 </SelectItem>

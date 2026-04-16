@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { FileTree } from "@/components/FileTree";
 import { CodeEditor } from "@/components/CodeEditor";
 import { ChatPanel } from "@/components/ChatPanel";
@@ -8,10 +8,10 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   GitBranch, Save, LogOut, PanelLeftClose, PanelLeft,
-  MessageSquare, PanelRightClose, X, Loader2, CheckSquare, Eye, EyeOff
+  MessageSquare, PanelRightClose, X, Loader2, CheckSquare, Eye, EyeOff, Code2
 } from "lucide-react";
 import { ArrowLeft } from "lucide-react";
-import { fetchFileContent, updateFile } from "@/lib/github";
+import { fetchFileContent, isTextFilePath, updateFile } from "@/lib/github";
 import type { TreeItem, Repo } from "@/lib/github";
 import { useToast } from "@/hooks/use-toast";
 
@@ -37,6 +37,7 @@ export function IDELayout({ token, repo, tree, onDisconnect, onSignOut, onBack }
   const [saving, setSaving] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [chatOpen, setChatOpen] = useState(true);
+  const [editorOpen, setEditorOpen] = useState(true);
   const [openTabs, setOpenTabs] = useState<string[]>([]);
   const [aiSelectedFiles, setAiSelectedFiles] = useState<Set<string>>(new Set());
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -48,6 +49,13 @@ export function IDELayout({ token, repo, tree, onDisconnect, onSignOut, onBack }
   const fileContent = currentFile?.content ?? "";
   const originalContent = currentFile?.original ?? "";
   const hasChanges = fileContent !== originalContent;
+  const allRepoPaths = useMemo(() => tree.map((item) => item.path), [tree]);
+  const allFilePaths = useMemo(
+    () => tree
+      .filter((item) => item.type === "blob" && isTextFilePath(item.path) && (item.size ?? 0) <= 50000)
+      .map((item) => item.path),
+    [tree],
+  );
 
   const selectFile = useCallback(async (path: string) => {
     if (fileCache[path]) {
@@ -118,10 +126,10 @@ export function IDELayout({ token, repo, tree, onDisconnect, onSignOut, onBack }
   };
 
   const selectAllForAi = () => {
-    if (aiSelectedFiles.size === openTabs.length) {
+    if (allFilePaths.length > 0 && aiSelectedFiles.size === allFilePaths.length) {
       setAiSelectedFiles(new Set());
     } else {
-      setAiSelectedFiles(new Set(openTabs));
+      setAiSelectedFiles(new Set(allFilePaths));
     }
   };
 
@@ -131,16 +139,63 @@ export function IDELayout({ token, repo, tree, onDisconnect, onSignOut, onBack }
 
   const effectiveAiFiles = aiFiles.length > 0 ? aiFiles : (selectedPath && fileCache[selectedPath] ? [{ path: selectedPath, content: fileCache[selectedPath].content }] : []);
 
+  const selectedAiCount = aiSelectedFiles.size > 0 ? aiSelectedFiles.size : selectedPath ? 1 : 0;
+
+  const prepareAiFiles = useCallback(async () => {
+    const selectedPaths = aiSelectedFiles.size > 0
+      ? Array.from(aiSelectedFiles)
+      : selectedPath
+        ? [selectedPath]
+        : [];
+
+    if (selectedPaths.length === 0) {
+      return [];
+    }
+
+    const missingPaths = selectedPaths.filter((path) => !fileCache[path]);
+    const loadedEntries: Record<string, FileEntry> = {};
+
+    for (let index = 0; index < missingPaths.length; index += 8) {
+      const batch = missingPaths.slice(index, index + 8);
+      const batchEntries = await Promise.all(
+        batch.map(async (path) => {
+          const content = await fetchFileContent(token, owner, repoName, path, repo.default_branch);
+          return [path, { path, content, original: content }] as const;
+        }),
+      );
+
+      Object.assign(loadedEntries, Object.fromEntries(batchEntries));
+    }
+
+    if (Object.keys(loadedEntries).length > 0) {
+      setFileCache((prev) => ({ ...prev, ...loadedEntries }));
+    }
+
+    return selectedPaths
+      .map((path) => {
+        const entry = fileCache[path] ?? loadedEntries[path];
+        return entry ? { path, content: entry.content } : null;
+      })
+      .filter((entry): entry is { path: string; content: string } => entry !== null);
+  }, [aiSelectedFiles, fileCache, owner, repo.default_branch, repoName, selectedPath, token]);
+
   const handleApplyEdits = (edits: Record<string, string>) => {
+    const editedPaths = Object.keys(edits);
+
     setFileCache((prev) => {
       const next = { ...prev };
       for (const [path, content] of Object.entries(edits)) {
-        if (next[path]) {
-          next[path] = { ...next[path], content };
-        }
+        next[path] = next[path]
+          ? { ...next[path], content }
+          : { path, content, original: "" };
       }
       return next;
     });
+
+    if (editedPaths.length > 0) {
+      setOpenTabs((prev) => Array.from(new Set([...prev, ...editedPaths])));
+      setSelectedPath((current) => current ?? editedPaths[0]);
+    }
   };
 
   return (
@@ -169,6 +224,20 @@ export function IDELayout({ token, repo, tree, onDisconnect, onSignOut, onBack }
               Commit
             </Button>
           )}
+          <Button
+            variant={allFilePaths.length > 0 && aiSelectedFiles.size === allFilePaths.length ? "secondary" : "ghost"}
+            size="sm"
+            className="h-7 gap-1.5 text-xs"
+            onClick={selectAllForAi}
+            disabled={allFilePaths.length === 0}
+            title="Select every text file in the repo for AI"
+          >
+            <CheckSquare className="h-3 w-3" />
+            {allFilePaths.length > 0 && aiSelectedFiles.size === allFilePaths.length ? "Clear All" : "All Files"}
+          </Button>
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditorOpen(!editorOpen)} title="Toggle editor">
+            <Code2 className="h-4 w-4" />
+          </Button>
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setPreviewOpen(!previewOpen)} title="Toggle preview">
             {previewOpen ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
           </Button>
@@ -209,16 +278,6 @@ export function IDELayout({ token, repo, tree, onDisconnect, onSignOut, onBack }
             {/* Tabs */}
             {openTabs.length > 0 && (
               <div className="flex items-center border-b border-border bg-card overflow-x-auto">
-                {openTabs.length > 1 && (
-                  <button
-                    onClick={selectAllForAi}
-                    className="flex items-center gap-1 px-2 py-1.5 text-[10px] text-muted-foreground hover:text-primary border-r border-border shrink-0 transition-colors"
-                    title={aiSelectedFiles.size === openTabs.length ? "Deselect all for AI" : "Select all for AI"}
-                  >
-                    <CheckSquare className="h-3.5 w-3.5" />
-                    <span>{aiSelectedFiles.size === openTabs.length ? "None" : "All"}</span>
-                  </button>
-                )}
                 {openTabs.map((tab) => {
                   const name = tab.split("/").pop() || tab;
                   const isActive = tab === selectedPath;
@@ -247,15 +306,15 @@ export function IDELayout({ token, repo, tree, onDisconnect, onSignOut, onBack }
                     </div>
                   );
                 })}
-                {aiSelectedFiles.size > 0 && (
+                {selectedAiCount > 0 && (
                   <span className="px-2 text-[10px] text-primary shrink-0">
-                    {aiSelectedFiles.size} file{aiSelectedFiles.size > 1 ? "s" : ""} for AI
+                    {selectedAiCount} file{selectedAiCount > 1 ? "s" : ""} for AI
                   </span>
                 )}
               </div>
             )}
 
-            {previewOpen ? (
+            {editorOpen && previewOpen ? (
               <ResizablePanelGroup direction="horizontal" className="flex-1">
                 <ResizablePanel defaultSize={50} minSize={20}>
                   {loadingFile ? (
@@ -275,7 +334,7 @@ export function IDELayout({ token, repo, tree, onDisconnect, onSignOut, onBack }
                   {selectedPath && <PreviewPanel filename={selectedPath} content={fileContent} />}
                 </ResizablePanel>
               </ResizablePanelGroup>
-            ) : (
+            ) : editorOpen ? (
               <div className="flex-1 overflow-hidden">
                 {loadingFile ? (
                   <div className="flex h-full items-center justify-center">
@@ -289,6 +348,21 @@ export function IDELayout({ token, repo, tree, onDisconnect, onSignOut, onBack }
                   </div>
                 )}
               </div>
+            ) : previewOpen ? (
+              <div className="flex-1 overflow-hidden">
+                {selectedPath ? (
+                  <PreviewPanel filename={selectedPath} content={fileContent} />
+                ) : (
+                  <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
+                    <p className="text-sm">Select a file to preview</p>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-1 flex-col items-center justify-center text-center text-muted-foreground">
+                <p className="text-sm">Code and preview are hidden</p>
+                <p className="mt-1 text-xs">Use the top bar buttons to reopen them.</p>
+              </div>
             )}
           </div>
         </ResizablePanel>
@@ -298,7 +372,14 @@ export function IDELayout({ token, repo, tree, onDisconnect, onSignOut, onBack }
           <>
             <ResizableHandle withHandle />
             <ResizablePanel defaultSize={30} minSize={15} maxSize={50}>
-              <ChatPanel files={effectiveAiFiles} onApplyEdits={handleApplyEdits} />
+              <ChatPanel
+                files={effectiveAiFiles}
+                selectedCount={selectedAiCount}
+                prepareFiles={prepareAiFiles}
+                repoName={repo.full_name}
+                repoTree={allRepoPaths}
+                onApplyEdits={handleApplyEdits}
+              />
             </ResizablePanel>
           </>
         )}
@@ -311,7 +392,7 @@ export function IDELayout({ token, repo, tree, onDisconnect, onSignOut, onBack }
         </div>
         <div className="flex items-center gap-3">
           {hasChanges && <span className="text-primary">● Modified</span>}
-          {aiSelectedFiles.size > 1 && <span className="text-primary">{aiSelectedFiles.size} files selected for AI</span>}
+          {selectedAiCount > 0 && <span className="text-primary">{selectedAiCount} files selected for AI</span>}
           <span>AI Code Editor</span>
         </div>
       </div>
